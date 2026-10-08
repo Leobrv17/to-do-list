@@ -1,0 +1,97 @@
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: daily-dashboard-db
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-dashboard}
+      POSTGRES_USER: ${POSTGRES_USER:-dashboard}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dashboard}
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U $${POSTGRES_USER:-dashboard} -d $${POSTGRES_DB:-dashboard}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - data_internal
+    security_opt:
+      - no-new-privileges:true
+
+  backend:
+    build:
+      context: ./backend
+    container_name: daily-dashboard-backend
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-dashboard}:${POSTGRES_PASSWORD:-dashboard}@db:5432/${POSTGRES_DB:-dashboard}
+    depends_on:
+      db:
+        condition: service_healthy
+    expose:
+      - "8000"
+    networks:
+      - app_internal
+      - data_internal
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  voice-agent:
+    build:
+      context: ./voice-agent
+    container_name: daily-dashboard-voice-agent
+    environment:
+      BACKEND_URL: http://backend:8000
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-mini}
+    depends_on:
+      - backend
+    expose:
+      - "8010"
+    networks:
+      - app_internal
+      - public
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: daily-dashboard-frontend
+    depends_on:
+      - backend
+      - voice-agent
+    ports:
+      - "127.0.0.1:3000:80"
+    networks:
+      - public
+      - app_internal
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  postgres_data:
+
+networks:
+  public:
+  app_internal:
+    internal: true
+  data_internal:
+    internal: true
