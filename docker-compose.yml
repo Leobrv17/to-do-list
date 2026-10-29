@@ -25,7 +25,6 @@ services:
   backend:
     build:
       context: ./backend
-    container_name: daily-dashboard-backend
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-dashboard}:${POSTGRES_PASSWORD:-dashboard}@db:5432/${POSTGRES_DB:-dashboard}
     depends_on:
@@ -33,6 +32,16 @@ services:
         condition: service_healthy
     expose:
       - "8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     networks:
       - app_internal
       - data_internal
@@ -83,6 +92,37 @@ services:
     tmpfs:
       - /var/cache/nginx
       - /var/run
+    security_opt:
+      - no-new-privileges:true
+
+  autoscaler:
+    build:
+      context: ./autoscaler
+      dockerfile: Dockerfile.autoscaler
+    container_name: daily-dashboard-autoscaler
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      MIN_REPLICAS: ${AUTOSCALE_MIN_REPLICAS:-1}
+      MAX_REPLICAS: ${AUTOSCALE_MAX_REPLICAS:-5}
+      CPU_SCALE_UP: ${AUTOSCALE_CPU_SCALE_UP:-80}
+      CPU_SCALE_DOWN: ${AUTOSCALE_CPU_SCALE_DOWN:-10}
+      SLEEP: ${AUTOSCALE_INTERVAL:-10}
+      COOLDOWN: ${AUTOSCALE_COOLDOWN:-60}
+      POSTGRES_DB: ${POSTGRES_DB:-dashboard}
+      POSTGRES_USER: ${POSTGRES_USER:-dashboard}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dashboard}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - .:/workspace:ro
+    network_mode: none
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
     security_opt:
       - no-new-privileges:true
 
