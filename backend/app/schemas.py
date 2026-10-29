@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models import TodoStatus
 
@@ -10,6 +10,11 @@ class TodoBase(BaseModel):
     description: str | None = None
     status: TodoStatus = TodoStatus.todo
     task_date: date | None = None
+
+    @field_validator("title", mode="before")
+    @classmethod
+    def strip_title(cls, value):
+        return value.strip() if isinstance(value, str) else value
 
 
 class TodoCreate(TodoBase):
@@ -21,6 +26,18 @@ class TodoUpdate(BaseModel):
     description: str | None = None
     status: TodoStatus | None = None
     task_date: date | None = None
+
+    @field_validator("title", mode="before")
+    @classmethod
+    def strip_title(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+    @field_validator("title", "status", "task_date")
+    @classmethod
+    def reject_explicit_null(cls, value):
+        if value is None:
+            raise ValueError("Ce champ ne peut pas etre nul")
+        return value
 
 
 class TodoRead(BaseModel):

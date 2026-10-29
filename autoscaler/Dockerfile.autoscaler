@@ -1,0 +1,7 @@
+FROM docker:29-cli
+
+WORKDIR /workspace
+
+COPY --chmod=755 autoscale.sh /usr/local/bin/autoscale.sh
+
+ENTRYPOINT ["/usr/local/bin/autoscale.sh"]

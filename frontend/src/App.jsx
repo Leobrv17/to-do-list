@@ -118,6 +118,10 @@ function App() {
     function connect() {
       socket = new WebSocket(websocketUrl());
 
+      socket.onopen = () => {
+        loadTodos(taskDate, { showLoading: false });
+      };
+
       socket.onmessage = (event) => {
         try {
           const message = JSON.parse(event.data);

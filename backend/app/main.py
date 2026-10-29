@@ -7,11 +7,12 @@ from sqlalchemy.orm import Session
 
 from app.database import Base, engine, get_db
 from app.models import Todo
+from app.realtime import lifespan, manager, notify_todo_change
 from app.schemas import TodoCreate, TodoRead, TodoUpdate
 
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="Daily Dashboard API", version="0.1.0")
+app = FastAPI(title="Daily Dashboard API", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -20,33 +21,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-class ConnectionManager:
-    def __init__(self) -> None:
-        self.active_connections: list[WebSocket] = []
-
-    async def connect(self, websocket: WebSocket) -> None:
-        await websocket.accept()
-        self.active_connections.append(websocket)
-
-    def disconnect(self, websocket: WebSocket) -> None:
-        if websocket in self.active_connections:
-            self.active_connections.remove(websocket)
-
-    async def broadcast(self, message: dict[str, str | int]) -> None:
-        stale_connections: list[WebSocket] = []
-        for connection in self.active_connections:
-            try:
-                await connection.send_json(message)
-            except RuntimeError:
-                stale_connections.append(connection)
-
-        for connection in stale_connections:
-            self.disconnect(connection)
-
-
-manager = ConnectionManager()
 
 
 @app.get("/health")
@@ -82,15 +56,17 @@ async def create_todo(payload: TodoCreate, db: Session = Depends(get_db)) -> Tod
         task_date=payload.task_date or date.today(),
     )
     db.add(todo)
-    db.commit()
-    db.refresh(todo)
-    await manager.broadcast(
+    db.flush()
+    notify_todo_change(
+        db,
         {
             "type": "created",
             "todo_id": todo.id,
             "task_date": todo.task_date.isoformat(),
         }
     )
+    db.commit()
+    db.refresh(todo)
     return todo
 
 
@@ -108,9 +84,8 @@ async def update_todo(todo_id: int, payload: TodoUpdate, db: Session = Depends(g
     for key, value in changes.items():
         setattr(todo, key, value)
 
-    db.commit()
-    db.refresh(todo)
-    await manager.broadcast(
+    notify_todo_change(
+        db,
         {
             "type": "updated",
             "todo_id": todo.id,
@@ -118,6 +93,8 @@ async def update_todo(todo_id: int, payload: TodoUpdate, db: Session = Depends(g
             "previous_task_date": previous_task_date.isoformat(),
         }
     )
+    db.commit()
+    db.refresh(todo)
     return todo
 
 
@@ -129,11 +106,12 @@ async def delete_todo(todo_id: int, db: Session = Depends(get_db)) -> None:
 
     task_date = todo.task_date
     db.delete(todo)
-    db.commit()
-    await manager.broadcast(
+    notify_todo_change(
+        db,
         {
             "type": "deleted",
             "todo_id": todo_id,
             "task_date": task_date.isoformat(),
         }
     )
+    db.commit()
